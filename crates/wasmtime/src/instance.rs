@@ -458,8 +458,8 @@ impl Instance {
         name: &str,
     ) -> Result<TypedFunc<Params, Results>>
     where
-        Params: crate::WasmParams,
-        Results: crate::WasmResults,
+        Params: crate::WasmParams + 'static,
+        Results: crate::WasmResults + 'static,
     {
         let f = self
             .get_export(store.as_context_mut(), name)

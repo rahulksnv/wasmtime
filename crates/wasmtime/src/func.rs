@@ -4,6 +4,7 @@ use crate::{
     StoreContextMut, Val, ValRaw, ValType,
 };
 use anyhow::{bail, Context as _, Error, Result};
+use std::any::Any;
 use std::future::Future;
 use std::mem;
 use std::panic::{self, AssertUnwindSafe};
@@ -282,6 +283,7 @@ macro_rules! generate_wrap_async_func {
         where
             $($args: WasmTy,)*
             R: WasmRet,
+            <R as crate::func::WasmRet>::Fallible: 'static,
         {
             assert!(store.as_context().async_support(), concat!("cannot use `wrap", $num, "_async` without enabling async support on the config"));
             Func::wrap(store, move |mut caller: Caller<'_, T>, $($args: $args),*| {
@@ -1270,8 +1272,8 @@ impl Func {
         store: impl AsContext,
     ) -> Result<TypedFunc<Params, Results>>
     where
-        Params: WasmParams,
-        Results: WasmResults,
+        Params: WasmParams + 'static,
+        Results: WasmResults + 'static,
     {
         // Type-check that the params/results are all valid
         let ty = self.ty(store);
@@ -1838,6 +1840,18 @@ impl<T> AsContextMut for Caller<'_, T> {
     }
 }
 
+fn show(results: &dyn Any) {
+    let ref_type: Result<(), ()> = Ok(());
+    if results.type_id() == ref_type.type_id() {
+        let p: &Result<(), ()> = results.downcast_ref().unwrap();
+        log::info!(
+            target: "wasmtime-debug",
+            "wasm_to_host_shim::Result<(), ()> = {:?}",
+            p
+        );
+    }
+}
+
 macro_rules! impl_into_func {
     ($num:tt $($args:ident)*) => {
         // Implement for functions without a leading `&Caller` parameter,
@@ -1849,6 +1863,7 @@ macro_rules! impl_into_func {
             F: Fn($($args),*) -> R + Send + Sync + 'static,
             $($args: WasmTy,)*
             R: WasmRet,
+            <R as crate::func::WasmRet>::Fallible: 'static,
         {
             fn into_func(self, engine: &Engine) -> (Box<VMHostFuncContext>, VMSharedSignatureIndex, VMTrampoline) {
                 let f = move |_: Caller<'_, T>, $($args:$args),*| {
@@ -1865,6 +1880,7 @@ macro_rules! impl_into_func {
             F: Fn(Caller<'_, T>, $($args),*) -> R + Send + Sync + 'static,
             $($args: WasmTy,)*
             R: WasmRet,
+            <R as crate::func::WasmRet>::Fallible: 'static,
         {
             fn into_func(self, engine: &Engine) -> (Box<VMHostFuncContext>, VMSharedSignatureIndex, VMTrampoline) {
                 /// This shim is called by Wasm code, constructs a `Caller`,
@@ -1884,6 +1900,7 @@ macro_rules! impl_into_func {
                     F: Fn(Caller<'_, T>, $( $args ),*) -> R + 'static,
                     $( $args: WasmTy, )*
                     R: WasmRet,
+                    <R as crate::func::WasmRet>::Fallible: 'static,
                 {
                     enum CallResult<U> {
                         Ok(U),
@@ -1897,6 +1914,8 @@ macro_rules! impl_into_func {
                     // destructors. As a result anything requiring a destructor
                     // should be part of this block, and the long-jmp-ing
                     // happens after the block in handling `CallResult`.
+                    let mut s1 = true;
+                    let mut s2 = true;
                     let result = Caller::with(caller_vmctx, |mut caller| {
                         let vmctx = VMHostFuncContext::from_opaque(vmctx);
                         let state = (*vmctx).host_state();
@@ -1923,6 +1942,16 @@ macro_rules! impl_into_func {
                                 r.into_fallible()
                             }))
                         };
+                        s1 = ret.is_ok();
+                        /*
+                        log::info!(
+                            target: "wasmtime-debug",
+                            "wasm_to_host_shim::types: T={}, R={}",
+                            std::any::type_name::<T>(),
+                            std::any::type_name::<R>()
+                        );
+                         */
+                        show(&ret);
 
                         // Note that we need to be careful when dealing with traps
                         // here. Traps are implemented with longjmp/setjmp meaning
@@ -1942,7 +1971,10 @@ macro_rules! impl_into_func {
                                 } else {
                                     match ret.into_abi_for_ret(caller.store.0, retptr) {
                                         Ok(val) => CallResult::Ok(val),
-                                        Err(trap) => CallResult::Trap(trap.into()),
+                                        Err(trap) => {
+                                            s2 = false;
+                                            CallResult::Trap(trap.into())
+                                        },
                                     }
                                 }
 
@@ -1952,8 +1984,18 @@ macro_rules! impl_into_func {
 
                     match result {
                         CallResult::Ok(val) => val,
-                        CallResult::Trap(err) => crate::trap::raise(err),
-                        CallResult::Panic(panic) => wasmtime_runtime::resume_panic(panic),
+                        CallResult::Trap(err) => {
+                            log::info!(
+                                target: "wasmtime-debug", "{}/{}, trap = {:?}", s1, s2, err,
+                            );
+                            crate::trap::raise(err)
+                        },
+                        CallResult::Panic(panic) => {
+                            log::info!(
+                                target: "wasmtime-debug", "{}/{}, panic = {:?}", s1, s2, panic
+                            );
+                            wasmtime_runtime::resume_panic(panic)
+                        },
                     }
                 }
 
@@ -1973,6 +2015,7 @@ macro_rules! impl_into_func {
                 where
                     $($args: WasmTy,)*
                     R: WasmRet,
+                    <R as crate::func::WasmRet>::Fallible: 'static,
                 {
                     let ptr = mem::transmute::<
                         *const VMFunctionBody,

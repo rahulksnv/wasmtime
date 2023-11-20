@@ -2,6 +2,7 @@ use super::{invoke_wasm_and_catch_traps, HostAbi};
 use crate::store::{AutoAssertNoGc, StoreOpaque};
 use crate::{AsContextMut, ExternRef, Func, FuncType, StoreContextMut, ValRaw, ValType};
 use anyhow::{bail, Result};
+use std::any::Any;
 use std::marker;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
@@ -34,7 +35,7 @@ impl<Params, Results> Clone for TypedFunc<Params, Results> {
 impl<Params, Results> TypedFunc<Params, Results>
 where
     Params: WasmParams,
-    Results: WasmResults,
+    Results: WasmResults + Any + 'static
 {
     /// An unchecked version of [`Func::typed`] which does not perform a
     /// typecheck and simply assumes that the type declared here matches the
@@ -85,7 +86,11 @@ where
             "must use `call_async` with async stores"
         );
         let func = self.func.caller_checked_anyfunc(store.0);
-        unsafe { Self::call_raw(&mut store, func, params) }
+        let ret = unsafe { Self::call_raw(&mut store, func, params) };
+        if ret.is_err() {
+            log::info!(target: "wasmtime-debug", "TypedFunc::call(): failed");
+        }
+        ret
     }
 
     /// Invokes this WebAssembly function with the specified parameters.
@@ -187,9 +192,16 @@ where
             *returned = true
         });
         let (_, ret, _, returned) = captures;
+        log::info!(
+            target: "wasmtime-debug",
+            "TypedFunc::call_raw(): result = {}, returned = {}",
+            result.is_ok(), returned
+        );
         debug_assert_eq!(result.is_ok(), returned);
         result?;
-        Ok(Results::from_abi(store.0, ret.assume_init()))
+        let ret = Results::from_abi(store.0, ret.assume_init());
+        Self::show_err(&ret);
+        Ok(ret)
     }
 
     /// Purely a debug-mode assertion, not actually used in release builds.
@@ -203,6 +215,19 @@ where
         );
         Params::typecheck(ty.params()).expect("params should match");
         Results::typecheck(ty.results()).expect("results should match");
+    }
+
+    /// Debug.
+    fn show_err(results: &dyn Any) {
+        let err_type: Result<(), ()> = Ok(());
+        if (*results).type_id() == err_type.type_id() {
+            let err: &Result<(), ()> = results.downcast_ref().unwrap();
+            log::info!(
+                target: "wasmtime-debug",
+                "TypedFunc::show_err(): {:?}",
+                err
+            );
+        }
     }
 }
 

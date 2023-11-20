@@ -6,7 +6,7 @@ use crate::{
     Instance, IntoFunc, Module, StoreContextMut, Val, ValRaw, ValType,
 };
 use anyhow::{bail, Context, Result};
-use log::warn;
+use log::{info, warn};
 use std::collections::hash_map::{Entry, HashMap};
 #[cfg(feature = "async")]
 use std::future::Future;
@@ -150,6 +150,7 @@ macro_rules! generate_wrap_async_func {
         where
             $($args: crate::WasmTy,)*
             R: crate::WasmRet,
+            <R as crate::func::WasmRet>::Fallible: 'static,
         {
             assert!(
                 self.engine.config().async_support,
@@ -551,6 +552,11 @@ impl<T> Linker<T> {
         name: &str,
         func: impl IntoFunc<T, Params, Args>,
     ) -> Result<&mut Self> {
+        log::info!(
+            target: "wasmtime-debug",
+            "linker::func_wrap(): module = {}, name = {}, Params = {}, Args = {}",
+            module, name, std::any::type_name::<Params>(), std::any::type_name::<Args>(),
+        );
         let func = HostFunc::wrap(&self.engine, func);
         let key = self.import_key(module, Some(name));
         self.insert(key, Definition::HostFunc(Arc::new(func)))?;
