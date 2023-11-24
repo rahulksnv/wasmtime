@@ -71,6 +71,10 @@ pub use wasmtime_environ::Trap;
 // `wasmtime_runtime::raise_user_trap`.
 pub(crate) unsafe fn raise(error: anyhow::Error) -> ! {
     let needs_backtrace = error.downcast_ref::<WasmBacktrace>().is_none();
+    log::warn!(
+        target: "wasmtime-debug", "Raising trap: {:?}, needs_backtrace = {}",
+        error, needs_backtrace
+    );
     wasmtime_runtime::raise_user_trap(error, needs_backtrace)
 }
 

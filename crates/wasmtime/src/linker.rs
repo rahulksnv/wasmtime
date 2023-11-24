@@ -552,7 +552,7 @@ impl<T> Linker<T> {
         name: &str,
         func: impl IntoFunc<T, Params, Args>,
     ) -> Result<&mut Self> {
-        log::info!(
+        info!(
             target: "wasmtime-debug",
             "linker::func_wrap(): module = {}, name = {}, Params = {}, Args = {}",
             module, name, std::any::type_name::<Params>(), std::any::type_name::<Args>(),

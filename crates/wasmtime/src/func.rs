@@ -4,7 +4,6 @@ use crate::{
     StoreContextMut, Val, ValRaw, ValType,
 };
 use anyhow::{bail, Context as _, Error, Result};
-use std::any::Any;
 use std::future::Future;
 use std::mem;
 use std::panic::{self, AssertUnwindSafe};
@@ -1840,6 +1839,7 @@ impl<T> AsContextMut for Caller<'_, T> {
     }
 }
 
+/*
 fn show(results: &dyn Any) {
     let ref_type: Result<(), ()> = Ok(());
     if results.type_id() == ref_type.type_id() {
@@ -1851,6 +1851,7 @@ fn show(results: &dyn Any) {
         );
     }
 }
+ */
 
 macro_rules! impl_into_func {
     ($num:tt $($args:ident)*) => {
@@ -1950,8 +1951,8 @@ macro_rules! impl_into_func {
                             std::any::type_name::<T>(),
                             std::any::type_name::<R>()
                         );
-                         */
                         show(&ret);
+                         */
 
                         // Note that we need to be careful when dealing with traps
                         // here. Traps are implemented with longjmp/setjmp meaning
@@ -1985,13 +1986,13 @@ macro_rules! impl_into_func {
                     match result {
                         CallResult::Ok(val) => val,
                         CallResult::Trap(err) => {
-                            log::info!(
+                            log::warn!(
                                 target: "wasmtime-debug", "{}/{}, trap = {:?}", s1, s2, err,
                             );
                             crate::trap::raise(err)
                         },
                         CallResult::Panic(panic) => {
-                            log::info!(
+                            log::warn!(
                                 target: "wasmtime-debug", "{}/{}, panic = {:?}", s1, s2, panic
                             );
                             wasmtime_runtime::resume_panic(panic)

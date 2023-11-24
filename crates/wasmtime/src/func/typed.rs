@@ -192,16 +192,9 @@ where
             *returned = true
         });
         let (_, ret, _, returned) = captures;
-        log::info!(
-            target: "wasmtime-debug",
-            "TypedFunc::call_raw(): result = {}, returned = {}",
-            result.is_ok(), returned
-        );
         debug_assert_eq!(result.is_ok(), returned);
         result?;
-        let ret = Results::from_abi(store.0, ret.assume_init());
-        Self::show_err(&ret);
-        Ok(ret)
+        Ok(Results::from_abi(store.0, ret.assume_init()))
     }
 
     /// Purely a debug-mode assertion, not actually used in release builds.
@@ -217,6 +210,7 @@ where
         Results::typecheck(ty.results()).expect("results should match");
     }
 
+    /*
     /// Debug.
     fn show_err(results: &dyn Any) {
         let err_type: Result<(), ()> = Ok(());
@@ -229,6 +223,7 @@ where
             );
         }
     }
+     */
 }
 
 /// A trait implemented for types which can be arguments and results for
